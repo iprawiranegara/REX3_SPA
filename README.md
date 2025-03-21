@@ -9,6 +9,8 @@ This repository contains a GPU-accelerated implementation of Structural Path Ana
 - [Features](#features)
 - [Requirements](#requirements)
 - [Installation](#installation)
+- [Data Sources](#data-sources)
+- [Data Preparation](#data-preparation)
 - [Usage](#usage)
 - [Methodology](#methodology)
   - [Multi-Regional Input-Output Foundation](#multi-regional-input-output-foundation)
@@ -43,6 +45,8 @@ This repository contains a GPU-accelerated implementation of Structural Path Ana
   - openpyxl
   - psutil
   - tqdm
+  - scipy
+  - h5py (for MATLAB file parsing)
 
 ## Installation
 
@@ -62,6 +66,66 @@ pip install -r requirements.txt
 pickle_path_template = r"REX3_Data/cached_rex3_data/rex3_{year}.pkl"
 output_directory = r"REX3_Results"
 ```
+
+## Data Sources
+
+This framework uses Resolved Exiobase version 3 (REX3) data, which is available from the Zenodo repository:
+
+**REX3 Dataset**: [https://zenodo.org/records/10354283](https://zenodo.org/records/10354283)
+
+The REX3 dataset provides multi-regional input-output tables (MRIOTs) in MATLAB (.mat) format, including:
+- Intermediate consumption matrices (T_REX3.mat)
+- Final demand matrices (Y_REX3.mat)
+- Environmental extensions (Q_REX3.mat)
+- Label files for countries, sectors, and environmental indicators
+
+## Data Preparation
+
+Before running the SPA analysis, the raw REX3 data must be parsed and converted to pickle files. This repository includes a parser script (`rex3_parser.py`) that handles this conversion.
+
+### Parser Configuration
+
+The parser requires the following configuration:
+
+```python
+BASE_PATH = r"REX3_Data"
+LABELS_PATH = os.path.join(BASE_PATH, "REX3_Labels")
+
+YEARS_TO_PROCESS = [2019, 2020, 2021]  # Change as needed
+
+mat_file_template_T = os.path.join(BASE_PATH, "REX3_{year}", "T_REX3.mat")
+mat_file_template_Y = os.path.join(BASE_PATH, "REX3_{year}", "Y_REX3.mat")
+mat_file_template_Q = os.path.join(BASE_PATH, "REX3_{year}", "Q_REX3.mat")
+```
+
+### Running the Parser
+
+1. Download the REX3 datasets from Zenodo and organize them according to the directory structure above
+2. Update the paths in the parser script to point to your data files
+3. Run the parser:
+
+```bash
+python rex3_parser.py
+```
+
+The parser will:
+1. Load the MATLAB matrices for each year
+2. Apply proper labeling to rows and columns
+3. Calculate the derived matrices (x, A, F, S)
+4. Save the processed data as pickle files in the specified output directory
+
+### Parser Output
+
+The parser creates a standardized `MRIOTable` object for each year with the following components:
+- **Z**: Transaction matrix showing inter-industry flows
+- **Y**: Final demand matrix
+- **x**: Total output vector
+- **A**: Technical coefficients matrix
+- **F**: Environmental stressors matrix
+- **Q**: Raw environmental stressors (same as F)
+- **S**: Direct stressor coefficients matrix
+
+These pickle files serve as the input for the SPA analysis.
 
 ## Usage
 
@@ -611,6 +675,9 @@ Contributions to improve the framework are welcome. Please follow these steps:
 3. Implement your changes
 4. Submit a pull request
 
+## License
+
+[Specify license information here]
 
 ---
 
