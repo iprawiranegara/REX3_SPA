@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use this software, cite this package."
+type: software
+license: MIT
+title: "oil-split-spa"
+version: 0.1.0
+authors:
+  - family-names: Prawiranegara
+    given-names: Izzu
+abstract: >-
+  Runs REX3 structural path analysis for disaggregated vegetable oil after
+  checking the builder database and its matching rebuild receipt.
+keywords:
+  - REX3
+  - structural path analysis
+  - vegetable oil
+  - supply chains
+references:
+  - type: data
+    title: "Resolved EXIOBASE 3 (REX3)"
+    authors:
+      - family-names: Cabernard
+        given-names: Livia
+      - family-names: Pfister
+        given-names: Stephan
+      - family-names: Hellweg
+        given-names: Stefanie
+    year: 2024
+    doi: 10.5281/zenodo.10354283

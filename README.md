@@ -1,197 +1,129 @@
-# REX3 Forward First-Arrival Structural Path Analysis
+# oil-split-spa
 
-A GPU-accelerated forward structural path analysis (SPA) framework for tracing commodity flows from specific origin countries to destination regions through the global inter-industry transaction network, with environmental impact attribution along each identified supply-chain route.
+`oil-split-spa` is **REX3 structural path analysis for disaggregated vegetable oil**.
+Its Python package is `oil_split_spa`.
 
-## Method
+The application runs after `rex3-vegetable-oil-builder` has created and
+independently validated a local vegetable-oil-disaggregated REX3 database and
+its matching vegetable-oil rebuild receipt.
 
-The framework combines three established input-output components in a configuration that, to our knowledge, has no single published precedent:
+## Required input
 
-1. **Ghosh allocation matrix** ($B = \hat{x}^{-1}Z$) for forward propagation through observed inter-industry transactions (Ghosh 1958; Dietzenbacher 1997)
-2. **First-arrival accounting** with destination-region absorption: when origin-linked flow first enters a destination-region node, it is captured and removed from further propagation
-3. **Alpha coefficient** ($\alpha_i = Y_{\text{target},i} / x_i$) for final-consumption capture at each SPA depth
+The application takes:
 
-The Ghosh matrix is used strictly as a descriptive accounting device recording how each unit of a seller's output was allocated across intermediate buyers during the accounting period. No behavioural supply-push assumption is made, and the well-documented theoretical objections of Oosterhaven (1988) do not apply to this descriptive use.
+- the accepted vegetable-oil-disaggregated REX3 HDF5 database;
+- its matching vegetable-oil rebuild receipt;
+- the builder release version; and
+- an analysis configuration.
 
-### What It Answers
+Before a full matrix data read, preflight reads HDF5 root metadata and
+compares the receipt and HDF5 map bindings. It then checks the schema,
+dimensions, order-sensitive axes, year, fingerprints, and required validation
+outcomes. A missing field, changed fingerprint, or failed required check stops
+the run.
 
-Given a specific origin country-sector (e.g., Indonesian vegetable oil processing), the method identifies:
+The receipt is the boundary between the builder and this application. The
+application does not resolve private mappings, search a user's computer, or
+load a copied cache.
 
-- Which countries and sectors the output passes through before first arriving in the destination region (e.g., EEA)
-- Whether arrival occurs as intermediate consumption by destination industries or final consumption by destination households and governments
-- The tier depth (number of inter-industry transaction steps) of each route
-- Whether routes are direct, domestic-indirect (origin-country value-chain processing), or third-country indirect
-- Gate-to-gate and cradle-to-gate environmental impacts embedded in each route
+## Analysis command and configuration
 
-### What It Does Not Answer
-
-- How supply chains would respond to policy interventions (the method is attributional, not consequential)
-- Certification-specific environmental performance within aggregate sectors
-- Total domestic-plus-imported footprints (only imported first-arrival exposure)
-
-## Data
-
-The implementation uses **REX3**, a geographically resolved extension of the EXIOBASE 3 multi-regional input-output database (Stadler et al. 2018):
-
-- **189 countries** (extended from EXIOBASE 3's 44 countries + 5 rest-of-world regions)
-- **163 product sectors** with detailed environmental extensions (GHG, land use, water, materials)
-- **Transaction matrix:** ~30,807 country-sector nodes (30,000+ before aggregation)
-- **Aggregated matrix:** 25,917 x 25,917 after destination-region collapse (e.g., 31 EEA countries to 1)
-- **Year:** 2022
-
-REX3 was selected over GTAP (57-65 sectors), WIOD (43 countries, 56 sectors), and Eora (26 sectors harmonised) for its combination of high geographic and sectoral resolution with comprehensive environmental satellite accounts, including land-use-change and deforestation extensions.
-
-## Pipeline
-
-### Step 1: Parser and Denoiser
-
-`Step 1 parser_denoise_HDF5.py`
-
-Parses raw REX3 `.mat` files and caches the cleaned MRIO tables (Z, Y, x, S, satellite accounts) as HDF5. This avoids re-parsing 4+ GB source files on each run.
-
-**Configuration:**
-
-```python
-BASE_PATH = r"REX3_Data"
-YEARS_TO_PROCESS = [2022]
+```text
+oil-split-spa run --database vegetable-oil.h5 --receipt vegetable-oil-rebuild-receipt.json --release-version 0.1.0 --config ANALYSIS_CONFIG.json
 ```
 
-### Step 2: SPA Engine
+The analysis configuration accepts only these fields:
 
-`Step 2 RENEW SPA_Ghosh_Edge_Depth_Tracking.py`
+- `year`, which must be 2022;
+- `final_demand_labels`;
+- `impact_indicators`;
+- `cutoff`;
+- `max_depth`; and
+- `output_directory`.
 
-Core GPU-accelerated SPA engine. Computes Leontief inverse L, Ghosh allocation matrix B, alpha coefficients, preprocesses B for first-arrival boundary conditions, and executes batched SPA with full edge-depth tracking.
+The output directory is selected by the user and should be outside the source
+tree. The command also accepts `--output-directory` to override the configured
+directory and `--allow-test-fixture` for the explicit synthetic profile used
+by tests.
 
-**Configuration:**
+Each run writes exactly these three deterministic names:
 
-```python
-years = [2022]
-max_depth = 100
-threshold = 1e-16
-min_output_threshold = 1e-3   # 0.001 M EUR
+- `summary.json`;
+- `path-rows.json`; and
+- `application-run-receipt.json`.
 
-origin_countries = ["Indonesia"]
-target_groups = {
-    "EEA": ["Austria", "Belgium", "Bulgaria", "Croatia", "Cyprus",
-             "Czech Republic", "Denmark", "Estonia", "Finland", "France",
-             "Germany", "Greece", "Hungary", "Iceland", "Ireland", "Italy",
-             "Latvia", "Lithuania", "Luxembourg", "Malta", "Netherlands",
-             "Poland", "Portugal", "Romania", "Slovakia", "Slovenia",
-             "Spain", "Sweden", "Norway", "Switzerland", "Liechtenstein"]
-}
-sectors = ["Processing vegetable oils and fats"]
+The application receipt records the builder receipt and database fingerprints,
+configuration fingerprint, and output fingerprints.
+
+`path-rows.json` contains depth and impact aggregates for each selected impact
+indicator. It does not contain country-sector sequences or trade routes.
+
+## Builder boundary
+
+Run the builder commands in this order before analysis:
+
+```text
+rex3-vegetable-oil build-base --config RAW_INPUT_CONFIG.json --output BASE.h5 --receipt BASE_RECEIPT.json
+rex3-vegetable-oil import-allocation --trade-source TRADE_SOURCE.csv --production-source PRODUCTION_SOURCE.csv --output-dir ALLOCATION_DIR
+rex3-vegetable-oil prepare-weights --trade ALLOCATION_DIR/trade-allocation.csv --production ALLOCATION_DIR/production-allocation.csv --countries COUNTRY_1,COUNTRY_2 --output WEIGHTS.json
+rex3-vegetable-oil build --config BUILD_CONFIG.json
+rex3-vegetable-oil validate --database vegetable-oil.h5 --receipt vegetable-oil-rebuild-receipt.json
 ```
 
-**Key operations:**
+The final rebuild receipt retains exactly eleven top-level fields:
+`receipt_schema`, `release_version`, `command_name`,
+`configuration_fingerprint`, `source_records`, `output`, `checks`,
+`optional_checks`, `backend_identity`, `software_identity`, and `fallbacks`.
+The separate base-build receipt from `build-base` is not accepted in place of
+the final vegetable-oil rebuild receipt.
 
-- Leontief inverse: $L = (I - A)^{-1}$ on aggregated 25,917 x 25,917 matrix
-- Ghosh allocation: $B = \hat{x}^{-1}Z$ with target-to-target zeroing
-- Alpha vector: $\alpha_i = Y_{\text{target},i} / x_i$ for final-consumption capture
-- Batched SPA iteration with per-step IC/FC capture, edge recording, and convergence checking
-- C2G intensity: $\text{C2G}_{k} = \sum_i S_{ki} \times L_{i,\text{origin}}$
-- G2G intensity: $\text{G2G}_{k} = S_{k,\text{origin}}$
+Production builder output binds the named release maps
+`country-concordance.json`, `item-map.json`, and
+`vegetable-oil-scope.json`. The builder validates and hashes them, stores the
+binding in the final receipt and HDF5 root metadata, and includes it in the
+configuration fingerprint. The country concordance has 187 mapped and 2
+declared unavailable REX3 country identifiers. `import-allocation` and
+`prepare-weights` use zero shares only for those two rows. An observed country
+or bilateral pair must have a positive source total; otherwise the importer
+stops without a fallback share.
 
-**Output:** Parquet files with full edge-depth-route records, Excel summaries, checkpoint CSVs.
+## Optional CuPy backend
 
-### Step 3: Visualizer
+`oil-split-spa` uses NumPy for its analysis and does not install or select
+CuPy. It accepts a builder receipt that records either the `numpy` or
+`cupy-managed` build backend.
 
-`Step 3 Data Visualizer V2.py`
+## Sources and package boundary
 
-Reads Step 2 output and generates Sankey diagrams and summary tables for route analysis.
+REX3 2022 and the needed FAOSTAT trade and crop-production inputs are
+user-acquired and never bundled. Review publisher use and reuse terms at
+acquisition time. Access does not grant redistribution rights.
 
-## Hardware Requirements
+USDA Production, Supply and Distribution and UN Comtrade are external
+reference-only sources. Their links and terms remain reference information.
+They are not builder inputs and do not appear in the analysis configuration,
+receipt, or validation results.
 
-### GPU (required)
+No raw data, HDF5/database files, tensors, inverse matrices, caches, generated
+scientific results, credentials, or local paths are package files. Generated
+analysis output is written only to the user-selected output directory.
 
-The SPA engine uses CuPy for all matrix operations and requires an NVIDIA GPU with CUDA support.
+## Checks and package build
 
-| Operation                           | Peak VRAM                                  |
-| ----------------------------------- | ------------------------------------------ |
-| Matrix inversion (L, G on 25,917²) | ~16.1 GB                                   |
-| SPA batched iteration               | ~5.6 GB                                    |
-| **Minimum GPU VRAM**          | **24 GB (e.g., L4, RTX 4090, A100)** |
+Run the application tests with bytecode and pytest-cache writes disabled:
 
-### CPU RAM
-
-| Operation                         | Peak RAM                    |
-| --------------------------------- | --------------------------- |
-| Loading full DataFrames from HDF5 | ~45 GB                      |
-| **Minimum system RAM**      | **64 GB recommended** |
-
-### Precision
-
-FP64 (double precision) is mandatory throughout the pipeline. FP32 produces unreliable results due to error cascade through 100-depth SPA iterations, condition-number sensitivity in 25,917² matrix inversion, small-denominator amplification in the alpha vector, and C2G/G2G divergence magnification (ratios up to 4,500x for land-use-change emissions).
-
-## Completed Analyses
-
-All analyses use 2022 REX3 data.
-
-| Origin    | Destination | Sector                             | Status   |
-| --------- | ----------- | ---------------------------------- | -------- |
-| Indonesia | EEA         | Processing vegetable oils and fats | Complete |
-| Indonesia | EEA         | EUDR commodity basket              | Complete |
-| Indonesia | EEA         | Paper                              | Complete |
-| Indonesia | EEA         | Pulp                               | Complete |
-| Indonesia | EEA         | Cultivation of oil seeds           | Complete |
-| Indonesia | China       | Processing vegetable oils and fats | Complete |
-| Brazil    | EEA         | EUDR commodity basket              | Complete |
-| Brazil    | EEA         | Processing of meat cattle          | Complete |
-
-**Important labeling note:** For Brazil-origin scenarios, the "Processing vegetable oils and fats" sector is approximately 90% soybean oil, not palm oil. Results must be labeled as "Processing vegetable oils and fats (predominantly soy)" to avoid materially misleading policy interpretations (Decision D18).
-
-## Repository Structure
-
-```
-project_registry/
-  eudr_products/           # EUDR methodology, sources, results, audit documents
-    audit/                 # 5 external audit sessions (3 model families)
-    results/               # Completed analysis outputs (parquet, Excel, Sankey)
-    sources/literature/    # Literature review files and master bibliography
-    methodology_paper_sections.md  # Publication-draft methodology
-  shared/
-    code/                  # Pipeline scripts (Step 1-3)
-    communications/        # Development chat logs
-  tuna/                    # Separate tuna project
-REX3_Data/                 # Raw MRIO matrices (27 GB, untracked)
-docs/                      # Project state, decisions, session logs
-PM_Log/                    # Project management artifacts
+```bash
+env PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider tests
 ```
 
-## Methodology Validation
+Build package archives into a directory outside the source tree:
 
-The methodology has been subjected to five independent external audits across three model families:
-
-| Audit                                    | Focus                                        | Verdict                                                           |
-| ---------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------- |
-| Comprehensive methodology + code         | Core methodology V1-V7, code alignment C1-C7 | Components established; hybrid configuration novel-but-defensible |
-| Empirical data validation                | Data R1-R5, convergence patterns             | Core matrices match methodology                                   |
-| Hostile adversarial review (GPT-5.4)     | Literature precedent, alpha uniqueness       | No single published precedent found; alpha is unique choice       |
-| Hostile adversarial review (Antigravity) | Cross-audit consistency                      | Publishable with revisions                                        |
-| Phase 2 literature audit                 | Citation verification, bibliography          | 54 citations, 53 verified                                         |
-
-**Consolidated verdict:** Publishable with revisions. The method uses established components (Ghosh B, Leontief L, SPA power series, C2G intensities) in a novel forward first-arrival configuration.
-
-## Key References
-
-Defourny, J. and Thorbecke, E. (1984). Structural path analysis and multiplier decomposition within a social accounting matrix framework. *The Economic Journal*, 94(373), 111-136. DOI: 10.2307/2232220.
-
-Dietzenbacher, E. (1997). In vindication of the Ghosh model: a reinterpretation as a price model. *Journal of Regional Science*, 37(4), 629-651. DOI: 10.1111/0022-4146.00073.
-
-Ghosh, A. (1958). Input-output approach in an allocation system. *Economica*, 25(97), 58-64. DOI: 10.2307/2550694.
-
-Miller, R.E. and Blair, P.D. (2009). *Input-output analysis: foundations and extensions*. 2nd edn. Cambridge: Cambridge University Press. DOI: 10.1017/CBO9780511626982.
-
-Oosterhaven, J. (1988). On the plausibility of the supply-driven input-output model. *Journal of Regional Science*, 28(2), 203-217. DOI: 10.1111/j.1467-9787.1988.tb01208.x.
-
-Peters, G.P. (2008). From production-based to consumption-based national emission inventories. *Ecological Economics*, 65(1), 13-23. DOI: 10.1016/j.ecolecon.2007.10.014.
-
-Stadler, K. et al. (2018). EXIOBASE 3: developing a time series of detailed environmentally extended multi-regional input-output tables. *Journal of Industrial Ecology*, 22(3), 502-515. DOI: 10.1111/jiec.12715.
-
-Wiedmann, T. (2009). A review of recent multi-region input-output models used for consumption-based emission and resource accounting. *Ecological Economics*, 69(2), 211-222. DOI: 10.1016/j.ecolecon.2009.08.026.
+```bash
+python -m build --sdist --wheel --outdir "$BUILD_DIR"
+```
 
 ## License
 
-This project is not yet licensed for public use. Contact the author for collaboration inquiries.
-
-## Author
-
-Izzu Prawiranegara
+Copyright (c) 2026 Izzu Prawiranegara. This package's source code is available
+under the MIT License. The license applies to this package's code and
+documentation, not to user-acquired REX3, FAOSTAT, or other source inputs.
